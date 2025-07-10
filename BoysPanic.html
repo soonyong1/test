@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>걸스패닉 - Qix 룰 적용 (사각형 점령 + UI + Fuse)</title>
+  <style>
+    html, body {
+      margin: 0; padding: 0; height: 100%; background: black;
+      font-family: sans-serif;
+      overflow: hidden;
+      user-select: none;
+    }
+    #game-container {
+      position: relative;
+      width: 800px; height: 600px;
+      margin: 20px auto;
+      background: black;
+      border: 5px solid white;
+    }
+    #gif-layer {
+      position: absolute;
+      width: 100%; height: 100%;
+      background-image: url('https://drive.google.com/uc?export=view&id=1DGMRIhtE8B9jM5I7TZcCNCEeIpgsKFNS');
+      background-size: cover;
+      z-index: 1;
+      mask: url(#reveal-mask);
+      -webkit-mask: url(#reveal-mask);
+      mask-type: luminance;
+      -webkit-mask-type: luminance;
+    }
+    #mask-svg {
+      position: absolute;
+      width: 100%; height: 100%;
+      z-index: 0;
+    }
+    #player {
+      position: absolute;
+      width: 10px; height: 10px;
+      background: red;
+      z-index: 3;
+      border-radius: 2px;
+    }
+    #trail {
+      position: absolute;
+      width: 100%; height: 100%;
+      z-index: 2;
+    }
+    .trail-dot {
+      position: absolute;
+      width: 4px; height: 4px;
+      background: yellow;
+      border-radius: 50%;
+      pointer-events: none;
+    }
+    #progress {
+      position: absolute;
+      top: 10px; left: 10px;
+      background: rgba(0,0,0,0.6);
+      color: white;
+      padding: 8px 14px;
+      border-radius: 8px;
+      z-index: 4;
+    }
+    #buttons {
+      position: absolute;
+      top: 50px; right: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      z-index: 4;
+    }
+    #buttons button {
+      padding: 8px 12px;
+      background: #333;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    #buttons button:hover {
+      background: #555;
+    }
+    #fuse {
+      position: absolute;
+      width: 12px; height: 12px;
+      background: orange;
+      border-radius: 50%;
+      z-index: 5;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+<div id="game-container">
+  <svg id="mask-svg">
+    <mask id="reveal-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="800" height="600">
+      <rect width="800" height="600" fill="black" />
+    </mask>
+  </svg>
+  <div id="gif-layer"></div>
+  <div id="trail"></div>
+  <div id="player"></div>
+  <div id="progress">점령률: 0%</div>
+  <div id="buttons">
+    <button id="btn-gonebi">권은비</button>
+    <button id="btn-legend">레전드</button>
+    <button id="btn-reset">다시하기</button>
+  </div>
+  <div id="fuse"></div>
+</div>
+
+<script>
+const container = document.getElementById('game-container');
+const player = document.getElementById('player');
+const trailLayer = document.getElementById('trail');
+const maskSvg = document.getElementById('mask-svg');
+const mask = maskSvg.querySelector('mask');
+const progress = document.getElementById('progress');
+const gifLayer = document.getElementById('gif-layer');
+const fuseElem = document.getElementById('fuse');
+
+const btnGonebi = document.getElementById('btn-gonebi');
+const btnLegend = document.getElementById('btn-legend');
+const btnReset = document.getElementById('btn-reset');
+
+const W = container.clientWidth;
+const H = container.clientHeight;
+const step = 4;
+
+let px = 0, py = 0;
+let vx = 0, vy = 0;
+let drawing = false;
+let path = [];
+let filledPolygons = [];
+
+const fuseSpeed = 2;
+let fuse = { x: W / 2, y: H / 2, targetIndex: 0 };
+
+let gameRunning = true;
+
+player.style.left = px + 'px';
+player.style.top = py + 'px';
+
+window.addEventListener('keydown', (e) => {
+  if (!gameRunning) return;
+  switch (e.key) {
+    case 'ArrowUp': vx = 0; vy = -step; break;
+    case 'ArrowDown': vx = 0; vy = step; break;
+    case 'ArrowLeft': vx = -step; vy = 0; break;
+    case 'ArrowRight': vx = step; vy = 0; break;
+  }
+});
+
+function onEdge(x, y) {
+  return x <= 0 || y <= 0 || x >= W - 10 || y >= H - 10;
+}
+
+function distance(x1, y1, x2, y2) {
+  return Math.sqrt((x1 - x2)**2 + (y1 - y2)**2);
+}
+
+function getRandomPointOnFilledPolygonsEdge() {
+  if (filledPolygons.length === 0) {
+    const edges = [
+      {x: Math.random() * W, y: 0},
+      {x: Math.random() * W, y: H},
+      {x: 0, y: Math.random() * H},
+      {x: W, y: Math.random() * H},
+    ];
+    return edges[Math.floor(Math.random() * edges.length)];
+  }
+  const randomPoly = filledPolygons[Math.floor(Math.random() * filledPolygons.length)];
+  return randomPoly[Math.floor(Math.random() * randomPoly.length)];
+}
+
+function loop() {
+  if (!gameRunning) {
+    requestAnimationFrame(loop);
+    return;
+  }
+
+  px += vx;
+  py += vy;
+  px = Math.max(0, Math.min(W - 10, px));
+  py = Math.max(0, Math.min(H - 10, py));
+  player.style.left = px + 'px';
+  player.style.top = py + 'px';
+
+  const currentPoint = {x: px + 5, y: py + 5};
+
+  if (onEdge(px, py)) {
+    if (drawing) {
+      drawing = false;
+      closePath();
+    }
+  } else {
+    if (!drawing) {
+      drawing = true;
+      path = [];
+    }
+    const foundIndex = path.findIndex(p => p.x === currentPoint.x && p.y === currentPoint.y);
+    if (foundIndex !== -1) {
+      drawing = false;
+      path = path.slice(foundIndex);
+      closePath();
+    } else {
+      path.push(currentPoint);
+      drawTrail(px + 3, py + 3);
+    }
+  }
+
+  moveFuse();
+
+  requestAnimationFrame(loop);
+}
+
+function drawTrail(x, y) {
+  const dot = document.createElement('div');
+  dot.className = 'trail-dot';
+  dot.style.left = `${x}px`;
+  dot.style.top = `${y}px`;
+  trailLayer.appendChild(dot);
+}
+
+function closePath() {
+  if (path.length < 3) return;
+
+  const minX = Math.min(...path.map(p => p.x));
+  const maxX = Math.max(...path.map(p => p.x));
+  const minY = Math.min(...path.map(p => p.y));
+  const maxY = Math.max(...path.map(p => p.y));
+
+  const rectPoints = [
+    {x: minX, y: minY},
+    {x: maxX, y: minY},
+    {x: maxX, y: maxY},
+    {x: minX, y: maxY}
+  ];
+
+  const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+  polygon.setAttribute('points', rectPoints.map(p => `${p.x},${p.y}`).join(' '));
+  polygon.setAttribute('fill', 'white');
+  mask.appendChild(polygon);
+
+  filledPolygons.push(rectPoints);
+  updateProgress();
+
+  fuse.targetIndex = 0;
+
+  trailLayer.innerHTML = '';
+  path = [];
+}
+
+function polygonArea(pts) {
+  let area = 0;
+  for (let i = 0; i < pts.length; i++) {
+    let j = (i + 1) % pts.length;
+    area += (pts[i].x * pts[j].y - pts[j].x * pts[i].y);
+  }
+  return Math.abs(area / 2);
+}
+
+function updateProgress() {
+  let total = W * H;
+  let filled = filledPolygons.reduce((sum, poly) => sum + polygonArea(poly), 0);
+  let percent = Math.min(100, Math.floor((filled / total) * 100));
+  progress.textContent = `점령률: ${percent}%`;
+  if (percent >= 80) alert("🎉 80% 이상 점령 완료!");
+}
+
+function moveFuse() {
+  if (!gameRunning) return;
+
+  let target;
+  if (path.length > 0) {
+    target = path[fuse.targetIndex];
+    if (!target) {
+      fuse.targetIndex = 0;
+      target = path[0];
+    }
+  } else {
+    target = getRandomPointOnFilledPolygonsEdge();
+  }
+
+  const dx = target.x - fuse.x;
+  const dy = target.y - fuse.y;
+  const dist = Math.sqrt(dx*dx + dy*dy);
+
+  if (dist < fuseSpeed) {
+    fuse.x = target.x;
+    fuse.y = target.y;
+    if (path.length > 0) {
+      fuse.targetIndex++;
+      if (fuse.targetIndex >= path.length) fuse.targetIndex = 0;
+    }
+  } else {
+    fuse.x += (dx / dist) * fuseSpeed;
+    fuse.y += (dy / dist) * fuseSpeed;
+  }
+
+  fuseElem.style.left = (fuse.x - 6) + 'px';
+  fuseElem.style.top = (fuse.y - 6) + 'px';
+
+  if (path.length > 0) {
+    for (const p of path) {
+      if (distance(p.x, p.y, fuse.x, fuse.y) < 6) {
+        gameOver();
+        break;
+      }
+    }
+  }
+}
+
+function gameOver() {
+  if (!gameRunning) return;
+  gameRunning = false;
+  alert('Game Over! 경찰이 당신을 따라 잡았습니다.');
+}
+
+function resetGame() {
+  px = 0; py = 0;
+  vx = 0; vy = 0;
+  drawing = false;
+  path = [];
+  filledPolygons = [];
+  player.style.left = px + 'px';
+  player.style.top = py + 'px';
+  trailLayer.innerHTML = '';
+  mask.innerHTML = '<rect width="800" height="600" fill="black" />';
+
+  fuse.x = W / 2;
+  fuse.y = H / 2;
+  fuse.targetIndex = 0;
+  fuseElem.style.left = (fuse.x - 6) + 'px';
+  fuseElem.style.top = (fuse.y - 6) + 'px';
+
+  gameRunning = true;
+  updateProgress();
+}
+
+btnGonebi.onclick = () => {
+  gifLayer.style.backgroundImage = "url('https://drive.google.com/uc?export=view&id=1DGMRIhtE8B9jM5I7TZcCNCEeIpgsKFNS')";
+};
+btnLegend.onclick = () => {
+  gifLayer.style.backgroundImage = "url('https://drive.google.com/uc?export=view&id=1glUK5rFpHvr4aCsexeBU4pXlCqC7URQx')";
+};
+btnReset.onclick = () => {
+  resetGame();
+};
+
+loop();
+</script>
+</body>
+</html>
