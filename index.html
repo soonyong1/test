@@ -2,6 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>걸스패닉 - Qix 룰 적용 (사각형 점령 + UI + Fuse)</title>
   <style>
     html, body {
@@ -89,6 +90,43 @@
       z-index: 5;
       pointer-events: none;
     }
+
+    /* 모바일 조작 버튼 UI */
+    #mobile-controls {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      user-select: none;
+    }
+    .arrow-row {
+      display: flex;
+      gap: 8px;
+    }
+    #mobile-controls button {
+      width: 60px;
+      height: 60px;
+      font-size: 24px;
+      border: none;
+      border-radius: 12px;
+      background-color: rgba(255, 255, 255, 0.2);
+      color: white;
+      font-weight: bold;
+    }
+    #mobile-controls button:active {
+      background-color: rgba(255, 255, 255, 0.5);
+    }
+
+    @media (min-width: 800px) {
+      #mobile-controls {
+        display: none;
+      }
+    }
   </style>
 </head>
 <body>
@@ -108,6 +146,18 @@
     <button id="btn-reset">다시하기</button>
   </div>
   <div id="fuse"></div>
+</div>
+
+<!-- 모바일 전용 조작 버튼 -->
+<div id="mobile-controls">
+  <div class="arrow-row">
+    <button id="btn-up">↑</button>
+  </div>
+  <div class="arrow-row">
+    <button id="btn-left">←</button>
+    <button id="btn-down">↓</button>
+    <button id="btn-right">→</button>
+  </div>
 </div>
 
 <script>
@@ -153,6 +203,16 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
+// 모바일 버튼용 이동 함수
+const setMove = (x, y) => {
+  vx = x;
+  vy = y;
+};
+document.getElementById('btn-up').addEventListener('touchstart', () => setMove(0, -step));
+document.getElementById('btn-down').addEventListener('touchstart', () => setMove(0, step));
+document.getElementById('btn-left').addEventListener('touchstart', () => setMove(-step, 0));
+document.getElementById('btn-right').addEventListener('touchstart', () => setMove(step, 0));
+
 function onEdge(x, y) {
   return x <= 0 || y <= 0 || x >= W - 10 || y >= H - 10;
 }
@@ -174,7 +234,6 @@ function distance(x1, y1, x2, y2) {
 
 function getRandomPointOnFilledPolygonsEdge() {
   if (filledPolygons.length === 0) {
-    // 전체 화면 가장자리 랜덤 점 반환
     const edges = [
       {x: Math.random() * W, y: 0},
       {x: Math.random() * W, y: H},
@@ -183,9 +242,7 @@ function getRandomPointOnFilledPolygonsEdge() {
     ];
     return edges[Math.floor(Math.random() * edges.length)];
   }
-  // filledPolygons 가장자리 점들 중 랜덤 선택
   const randomPoly = filledPolygons[Math.floor(Math.random() * filledPolygons.length)];
-  // 네 점 중 랜덤 하나 선택
   return randomPoly[Math.floor(Math.random() * randomPoly.length)];
 }
 
@@ -195,7 +252,6 @@ function loop() {
     return;
   }
 
-  // 플레이어 이동
   px += vx;
   py += vy;
   px = Math.max(0, Math.min(W - 10, px));
@@ -205,7 +261,6 @@ function loop() {
 
   const currentPoint = {x: px + 5, y: py + 5};
 
-  // 점령 영역 처리
   if (onEdge(px, py)) {
     if (drawing) {
       drawing = false;
@@ -263,9 +318,7 @@ function closePath() {
 
   filledPolygons.push(rectPoints);
   updateProgress();
-
   resetFuseTargetIndexOnly();
-
   trailLayer.innerHTML = '';
   path = [];
 }
@@ -302,7 +355,6 @@ function moveFuse() {
       target = path[0];
     }
   } else {
-    // path가 없을 때는 점령된 영역 가장자리 또는 화면 가장자리 임의 점으로 이동
     target = getRandomPointOnFilledPolygonsEdge();
   }
 
@@ -355,13 +407,11 @@ function resetGame() {
   player.style.top = py + 'px';
   trailLayer.innerHTML = '';
   mask.innerHTML = '<rect width="800" height="600" fill="black" />';
-
   fuse.x = W / 2;
   fuse.y = H / 2;
   fuse.targetIndex = 0;
   fuseElem.style.left = (fuse.x - 6) + 'px';
   fuseElem.style.top = (fuse.y - 6) + 'px';
-
   gameRunning = true;
   updateProgress();
 }
@@ -377,7 +427,6 @@ btnReset.onclick = () => {
 };
 
 loop();
-
 </script>
 </body>
 </html>
